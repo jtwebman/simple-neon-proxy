@@ -152,7 +152,7 @@ By default, Node.js fetch creates a new TCP connection for each request. For tes
 
 - **HTTP Keep-Alive**: Connections are reused for multiple requests
 - **Connection Pool**: Up to 100 concurrent connections to PostgreSQL
-- **WebSocket Support**: Full WebSocket support for the Neon Pool class (enables transactions)
+- **Full WebSocket Support**: TCP pass-through to PostgreSQL enables real transactions via `Pool` class
 - **Type Handling**: Correctly handles JSON/JSONB, arrays, dates, and other PostgreSQL types
 
 ## License

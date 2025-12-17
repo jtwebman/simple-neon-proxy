@@ -205,8 +205,13 @@ export function startServer(config: ProxyConfig = {}): ProxyServer {
   // Native Bun PostgreSQL connection
   const db = new Bun.SQL(connectionString);
 
-  // WebSocket connections for transactions
-  const wsClients = new Map<unknown, ReturnType<typeof Bun.SQL>>();
+  // Parse connection string for TCP proxy
+  const connUrl = new URL(connectionString);
+  const pgHost = connUrl.hostname;
+  const pgPort = Number(connUrl.port) || 5432;
+
+  // WebSocket to TCP socket mapping
+  const wsToTcp = new Map<unknown, { socket: ReturnType<typeof Bun.connect> extends Promise<infer T> ? T : never }>();
 
   // Start server
   const server = Bun.serve({
@@ -290,52 +295,49 @@ export function startServer(config: ProxyConfig = {}): ProxyServer {
 
   websocket: {
     async open(ws) {
-      // Create dedicated connection for this WebSocket (enables transactions)
-      const client = new Bun.SQL(PG_CONNECTION_STRING);
-      wsClients.set(ws, client);
+      // Create raw TCP connection to PostgreSQL for wire protocol pass-through
+      try {
+        const socket = await Bun.connect({
+          hostname: pgHost,
+          port: pgPort,
+          socket: {
+            data(socket, data) {
+              // Forward PostgreSQL response to WebSocket
+              ws.sendBinary(data);
+            },
+            close() {
+              ws.close();
+            },
+            error(socket, error) {
+              console.error("TCP socket error:", error);
+              ws.close();
+            },
+          },
+        });
+        wsToTcp.set(ws, { socket });
+      } catch (error) {
+        console.error("Failed to connect to PostgreSQL:", error);
+        ws.close();
+      }
     },
 
     async message(ws, message) {
-      const client = wsClients.get(ws);
-      if (!client) {
-        ws.send(JSON.stringify({ type: "error", message: "No database connection" }));
+      const conn = wsToTcp.get(ws);
+      if (!conn) {
+        ws.close();
         return;
       }
 
-      try {
-        const msg = JSON.parse(message.toString()) as { type: string; query?: string; params?: unknown[] };
-
-        if (msg.type === "query" && msg.query) {
-          const result = await client.unsafe(msg.query, (msg.params || []) as any[]);
-          const rows = result as Record<string, unknown>[];
-
-          const fieldNames = rows.length > 0 ? Object.keys(rows[0]) : [];
-          const response: NeonQueryResponse = {
-            fields: fieldNames.map((name) => ({ name, dataTypeID: 25 })),
-            rows: rows.map((row) => fieldNames.map((name) => row[name])),
-            rowCount: rows.length,
-            command: msg.query.trim().split(/\s+/)[0].toUpperCase(),
-          };
-
-          ws.send(JSON.stringify({ type: "result", data: response }));
-        } else {
-          ws.send(JSON.stringify({ type: "error", message: "Unknown message type" }));
-        }
-      } catch (error) {
-        console.error("WebSocket query error:", error);
-        ws.send(JSON.stringify({
-          type: "error",
-          message: error instanceof Error ? error.message : "Unknown error",
-          code: (error as { code?: string })?.code || "UNKNOWN",
-        }));
-      }
+      // Forward WebSocket message to PostgreSQL as raw bytes
+      const data = message instanceof ArrayBuffer ? new Uint8Array(message) : message;
+      conn.socket.write(data);
     },
 
     close(ws) {
-      const client = wsClients.get(ws);
-      if (client) {
-        client.close();
-        wsClients.delete(ws);
+      const conn = wsToTcp.get(ws);
+      if (conn) {
+        conn.socket.end();
+        wsToTcp.delete(ws);
       }
     },
   },
@@ -343,7 +345,7 @@ export function startServer(config: ProxyConfig = {}): ProxyServer {
 
   // Startup message
   const maskedUrl = connectionString.replace(/:[^:@]+@/, ":***@");
-  console.log(`Simple Neon Proxy v1.1.1 (Bun ${Bun.version})`);
+  console.log(`Simple Neon Proxy v1.2.0 (Bun ${Bun.version})`);
   console.log(`HTTP endpoint: http://0.0.0.0:${port}/sql`);
   console.log(`WebSocket endpoint: ws://0.0.0.0:${port}/v2`);
   console.log(`PostgreSQL: ${maskedUrl}`);

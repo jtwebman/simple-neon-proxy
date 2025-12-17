@@ -11,8 +11,12 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll } from "bun:test";
-import { neon, neonConfig } from "@neondatabase/serverless";
+import { neon, neonConfig, Pool } from "@neondatabase/serverless";
 import { startServer, type ProxyServer } from "./index";
+import ws from "ws";
+
+// WebSocket constructor for Pool (Node.js doesn't have native WebSocket)
+neonConfig.webSocketConstructor = ws;
 
 const TEST_PORT = 4445;
 
@@ -406,6 +410,52 @@ describe("Simple Neon Proxy", () => {
       const result = await sql`SELECT * FROM type_tests WHERE 1 = 0`;
       expect(result.length).toBe(0);
       expect(Array.isArray(result)).toBe(true);
+    });
+  });
+
+  describe("WebSocket (Pool) - Transactions", () => {
+    it("should execute queries via Pool", async () => {
+      const pool = new Pool({ connectionString: DATABASE_URL });
+      try {
+        const result = await pool.query("SELECT 1 + 1 AS sum");
+        expect(result.rows[0].sum).toBe(2);
+      } finally {
+        await pool.end();
+      }
+    });
+
+    it("should handle transactions with commit", async () => {
+      const pool = new Pool({ connectionString: DATABASE_URL });
+      const client = await pool.connect();
+      try {
+        await client.query("BEGIN");
+        await client.query("INSERT INTO type_tests (text_col) VALUES ('tx_commit_test')");
+        await client.query("COMMIT");
+
+        // Verify the insert persisted
+        const result = await sql`SELECT text_col FROM type_tests WHERE text_col = 'tx_commit_test'`;
+        expect(result.length).toBe(1);
+      } finally {
+        client.release();
+        await pool.end();
+      }
+    });
+
+    it("should handle transactions with rollback", async () => {
+      const pool = new Pool({ connectionString: DATABASE_URL });
+      const client = await pool.connect();
+      try {
+        await client.query("BEGIN");
+        await client.query("INSERT INTO type_tests (text_col) VALUES ('tx_rollback_test')");
+        await client.query("ROLLBACK");
+
+        // Verify the insert was rolled back
+        const result = await sql`SELECT text_col FROM type_tests WHERE text_col = 'tx_rollback_test'`;
+        expect(result.length).toBe(0);
+      } finally {
+        client.release();
+        await pool.end();
+      }
     });
   });
 });
