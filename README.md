@@ -89,37 +89,43 @@ PG_CONNECTION_STRING="postgres://postgres:postgres@localhost:5432/mydb" bun run 
 
 ## Using with @neondatabase/serverless
 
-Configure the neon driver to use this proxy for maximum performance:
+Configure the neon driver to use this proxy **for local development/testing only**. In production, use the real Neon service without any of this configuration.
 
 ```typescript
 import { neon, neonConfig } from "@neondatabase/serverless";
 
-// Use Node.js native fetch with HTTP keep-alive for connection reuse
-import { Agent } from "undici";
+// Only configure for local proxy when using db.localtest.me
+const isLocalProxy = process.env.DATABASE_URL?.includes("db.localtest.me");
 
-const keepAliveAgent = new Agent({
-  keepAliveTimeout: 30_000,
-  keepAliveMaxTimeout: 30_000,
-});
+if (isLocalProxy) {
+  // Use Node.js native fetch with HTTP keep-alive for connection reuse
+  const { Agent } = await import("undici");
 
-neonConfig.fetchFunction = (url, init) => {
-  return fetch(url, { ...init, dispatcher: keepAliveAgent });
-};
+  const keepAliveAgent = new Agent({
+    keepAliveTimeout: 30_000,
+    keepAliveMaxTimeout: 30_000,
+  });
 
-// Configure for local proxy
-neonConfig.fetchEndpoint = (host) => {
-  const [protocol, port] = host === "db.localtest.me" ? ["http", 4444] : ["https", 443];
-  return `${protocol}://${host}:${port}/sql`;
-};
-neonConfig.useSecureWebSocket = false;
-neonConfig.wsProxy = (host) => `${host}:4444/v2`;
-neonConfig.pipelineTLS = false;
-neonConfig.pipelineConnect = false;
+  neonConfig.fetchFunction = (url, init) => {
+    return fetch(url, { ...init, dispatcher: keepAliveAgent });
+  };
 
-// Connect using db.localtest.me (resolves to 127.0.0.1)
-const sql = neon("postgres://postgres:postgres@db.localtest.me:4444/mydb");
+  // Configure for local proxy
+  neonConfig.fetchEndpoint = (host) => {
+    const [protocol, port] = host === "db.localtest.me" ? ["http", 4444] : ["https", 443];
+    return `${protocol}://${host}:${port}/sql`;
+  };
+  neonConfig.useSecureWebSocket = false;
+  neonConfig.wsProxy = (host) => `${host}:4444/v2`;
+  neonConfig.pipelineTLS = false;
+  neonConfig.pipelineConnect = false;
+}
 
-// Now use it like normal
+// In production: postgres://user:pass@ep-xxx.us-east-2.aws.neon.tech/mydb
+// For local testing: postgres://postgres:postgres@db.localtest.me:4444/mydb
+const sql = neon(process.env.DATABASE_URL);
+
+// Now use it like normal - works with both local proxy and real Neon
 const result = await sql`SELECT * FROM users`;
 ```
 
