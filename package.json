@@ -1,6 +1,6 @@
 {
   "name": "simple-neon-proxy",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "description": "Blazing fast Neon-compatible HTTP/WebSocket proxy for local PostgreSQL. Zero dependencies, powered by Bun.",
   "type": "module",
   "main": "index.ts",

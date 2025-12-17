@@ -343,7 +343,7 @@ export function startServer(config: ProxyConfig = {}): ProxyServer {
 
   // Startup message
   const maskedUrl = connectionString.replace(/:[^:@]+@/, ":***@");
-  console.log(`Simple Neon Proxy v1.1.0 (Bun ${Bun.version})`);
+  console.log(`Simple Neon Proxy v1.1.1 (Bun ${Bun.version})`);
   console.log(`HTTP endpoint: http://0.0.0.0:${port}/sql`);
   console.log(`WebSocket endpoint: ws://0.0.0.0:${port}/v2`);
   console.log(`PostgreSQL: ${maskedUrl}`);
