@@ -89,10 +89,22 @@ PG_CONNECTION_STRING="postgres://postgres:postgres@localhost:5432/mydb" bun run 
 
 ## Using with @neondatabase/serverless
 
-Configure the neon driver to use this proxy:
+Configure the neon driver to use this proxy for maximum performance:
 
 ```typescript
 import { neon, neonConfig } from "@neondatabase/serverless";
+
+// Use Node.js native fetch with HTTP keep-alive for connection reuse
+import { Agent } from "undici";
+
+const keepAliveAgent = new Agent({
+  keepAliveTimeout: 30_000,
+  keepAliveMaxTimeout: 30_000,
+});
+
+neonConfig.fetchFunction = (url, init) => {
+  return fetch(url, { ...init, dispatcher: keepAliveAgent });
+};
 
 // Configure for local proxy
 neonConfig.fetchEndpoint = (host) => {
@@ -111,7 +123,19 @@ const sql = neon("postgres://postgres:postgres@db.localtest.me:4444/mydb");
 const result = await sql`SELECT * FROM users`;
 ```
 
-> **Note:** `localtest.me` is a public DNS that resolves to 127.0.0.1. This works everywhere including in CI environments.
+### Why `localtest.me`?
+
+The `localtest.me` domain is a public DNS that resolves to `127.0.0.1`. We use it because:
+
+- **The neon driver requires a hostname** - It extracts the database name from the hostname
+- **Works everywhere** - No `/etc/hosts` modifications needed, works in CI environments
+- **Subdomain support** - `db.localtest.me`, `api.localtest.me` all resolve to localhost
+
+### Why HTTP Keep-Alive?
+
+By default, Node.js fetch creates a new TCP connection for each request. For tests running hundreds of queries, this adds significant overhead. The `undici` Agent with keep-alive reuses connections, making tests ~2x faster.
+
+**Note:** `undici` is built into Node.js 18+, no installation needed.
 
 ## Endpoints
 
